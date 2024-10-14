@@ -11,7 +11,7 @@
         </intent>
     </queries>
     <application
-        android:label="cypherlock_new"
+        android:label="CypherLock"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:enableOnBackInvokedCallback="true"> 

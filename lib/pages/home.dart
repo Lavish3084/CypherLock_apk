@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'detailScreen.dart';
 import 'package:cypherlock_new/services/googleSheets.dart';
+import 'package:cypherlock_new/pages/loginpage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:cypherlock_new/services/fire_auth_services.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class Home extends StatefulWidget {
   const Home({super.key});
@@ -68,10 +72,26 @@ class _HomeState extends State<Home> {
     await _fetchMembers(); // Refresh the member list after deleting
   }
 
+  // Logout function to clear login state
+ Future<void> _logout() async {
+  SharedPreferences prefs = await SharedPreferences.getInstance();
+  await prefs.remove('isLoggedIn'); // Clear the login state
+
+  // Create an instance of FirebaseAuth
+  final FirebaseAuth firebaseAuth = FirebaseAuth.instance; // Initialize here
+
+  Navigator.pushReplacement(
+    context,
+    MaterialPageRoute(
+      builder: (context) => LoginPage(authService: FirebaseAuthService(firebaseAuth)), // Pass the required authService argument
+    ),
+  );
+}
+
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
       appBar: AppBar(
         centerTitle: true,
         title: Text(
@@ -81,7 +101,36 @@ class _HomeState extends State<Home> {
             fontSize: 20,
           ),
         ),
-        backgroundColor: Color.fromARGB(255, 252, 211, 211),
+        backgroundColor: const Color.fromARGB(255, 232, 69, 69),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.logout),
+            onPressed: () async {
+              // Show a confirmation dialog before logout
+              bool? shouldLogout = await showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: Text('Logout'),
+                  content: Text('Are you sure you want to log out?'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: Text('Cancel'),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      child: Text('Logout'),
+                    ),
+                  ],
+                ),
+              );
+
+              if (shouldLogout == true) {
+                _logout(); // Call the logout function
+              }
+            },
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -95,10 +144,10 @@ class _HomeState extends State<Home> {
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8.0),
                 ),
-                prefixIconColor: Colors.white,
-                hintStyle: TextStyle(color: const Color.fromARGB(255, 188, 188, 188)),
+                prefixIconColor: Colors.black,
+                hintStyle: TextStyle(color: const Color.fromARGB(255, 132, 132, 132)),
               ),
-              style: TextStyle(color: Colors.white),
+              style: TextStyle(color: Colors.black),
               onChanged: (value) {
                 setState(() {
                   searchQuery = value.toLowerCase();
@@ -108,7 +157,7 @@ class _HomeState extends State<Home> {
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: Color.fromARGB(255, 252, 211, 211), // Background color
+              backgroundColor: const Color.fromARGB(255, 232, 69, 69), // Background color
             ),
             onPressed: () {
               // Prompt to add a new member
@@ -168,79 +217,81 @@ class _HomeState extends State<Home> {
                 ? Center(child: CircularProgressIndicator())
                 : _hasError
                     ? Center(child: Text('Failed to load data. Please try again.'))
-                    : _members.isEmpty
+                    : _members.length <= 1
                         ? Center(child: Text('No members found.'))
-                        : ListView.separated(
-                            itemCount: _members.length,
-                            itemBuilder: (context, index) {
-                              final member = _members[index];
+                        : (() {
+                            // Skip the header row and filter members based on search query
+                            List<List<dynamic>> filteredMembers = _members.skip(1).where((member) {
                               final name = member[1].toString().toLowerCase();
                               final uid = member[2].toString().toLowerCase();
+                              return searchQuery.isEmpty ||
+                                  name.contains(searchQuery) ||
+                                  uid.contains(searchQuery);
+                            }).toList();
 
-                              // If search query matches either name or UID, show the member
-                              if (searchQuery.isNotEmpty &&
-                                  !name.contains(searchQuery) &&
-                                  !uid.contains(searchQuery)) {
-                                return Container();
-                              }
+                            // If no members match the search query, show a message
+                            if (filteredMembers.isEmpty) {
+                              return Center(child: Text('No members match your search.'));
+                            }
 
-                              return ListTile(
-                                title: Text(
-                                  member[1], // Display Name
-                                  style: TextStyle(color: Colors.white),
-                                ),
-                                subtitle: Text(
-                                  'UID: ${member[2]}', // Display UID
-                                  style: TextStyle(color: Colors.white),
-                                ),
-                                trailing: IconButton(
-                                  icon: Icon(
-                                    Icons.delete,
-                                    color: const Color.fromARGB(255, 224, 80, 70),
+                            return ListView.separated(
+                              itemCount: filteredMembers.length,
+                              itemBuilder: (context, index) {
+                                final member = filteredMembers[index];
+                                return ListTile(
+                                  title: Text(
+                                    member[1], // Display Name
+                                    style: TextStyle(color: Colors.black),
                                   ),
-                                  onPressed: () async {
-                                    await _deleteMember(index + 1); // Adjust for row number
+                                  subtitle: Text(
+                                    'UID: ${member[2]}', // Display UID
+                                    style: TextStyle(color: Colors.black),
+                                  ),
+                                  trailing: IconButton(
+                                    icon: Icon(
+                                      Icons.delete,
+                                      color: const Color.fromARGB(255, 232, 69, 69),
+                                    ),
+                                    onPressed: () async {
+                                      await _deleteMember(index + 2); // Adjust for row number
+                                    },
+                                  ),
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      PageRouteBuilder(
+                                        pageBuilder: (context, animation, secondaryAnimation) => MemberDetailsScreen(
+                                          name: member[1], // Pass Name
+                                          uid: member[2],  // Pass UID
+                                          memberId: member[3],  // Pass Member ID
+                                        ),
+                                        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                                          var begin = Offset(1.0, 0.0); // Start from the right
+                                          var end = Offset.zero; // End at the center
+                                          var curve = Curves.easeInOut; // Choose a curve for the animation
+
+                                          var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+                                          var offsetAnimation = animation.drive(tween);
+
+                                          return SlideTransition(
+                                            position: offsetAnimation,
+                                            child: child,
+                                          );
+                                        },
+                                        transitionDuration: Duration(seconds: 1), // Set the desired transition duration
+                                      ),
+                                    );
                                   },
-                                ),
-                                onTap: () {Navigator.push(
-                                  context,
-                                  PageRouteBuilder(
-                                  pageBuilder: (context, animation, secondaryAnimation) => MemberDetailsScreen(
-                                  name: member[1], // Pass Name
-                                  uid: member[2],  // Pass UID
-                                  memberId: member[3],  // Pass Member ID
-                                  ),
-                                  transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                                  // Define the beginning and end of the animation
-                                  var begin = Offset(1.0, 0.0); // Start from the right
-                                  var end = Offset.zero; // End at the center
-                                  var curve = Curves.easeInOut; // Choose a curve for the animation
-                            
-                                  // Create a tween for the animation
-                                  var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
-                                  var offsetAnimation = animation.drive(tween);
-                            
-                                  // Return the SlideTransition
-                                  return SlideTransition(
-                                    position: offsetAnimation,
-                                    child: child,
-                                  );
-                                },
-                                transitionDuration: Duration(seconds: 1), // Set the desired transition duration
-                              ),
+                                );
+                              },
+                              separatorBuilder: (context, index) {
+                                return Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                                  child: Divider(),
+                                );
+                              },
                             );
-
-  
-  
-                                },
-                              );
-                            },
-                            separatorBuilder: (context, index) {
-                              return Padding(
-                                padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
-                              );
-                            },
-                          ),
+                          }()),
           ),
         ],
       ),
